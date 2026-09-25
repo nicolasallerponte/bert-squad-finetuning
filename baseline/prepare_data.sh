@@ -5,7 +5,7 @@
 #SBATCH --job-name=bert-prepare
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=16G
+#SBATCH --mem=4G              # measured peak ~0.5 GB
 #SBATCH --time=00:30:00
 #SBATCH --output=logs/%x_%j.out
 
