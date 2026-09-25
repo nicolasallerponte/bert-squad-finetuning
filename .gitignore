@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+logs/
+# results/*.json ARE committed: they are the evidence behind the report

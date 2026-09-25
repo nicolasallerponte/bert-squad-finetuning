@@ -1,0 +1,6 @@
+# PyTorch is installed separately, from the CUDA 12.8 index, because FT3's A100 driver
+# (570.86.15) supports up to CUDA 12.8 and the default PyPI wheel targets CUDA 13:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+transformers
+datasets
+numpy
