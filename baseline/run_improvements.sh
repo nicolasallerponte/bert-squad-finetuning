@@ -30,6 +30,8 @@ run "2 + bf16 mixed precision"  --run-name s2_bf16      --precision bf16 --batch
 run "3 + larger batch"          --run-name s3_batch32   --precision bf16 --batch-size 32 --workers 8 --pin-memory
 run "4 + torch.compile"         --run-name s4_compile   --precision bf16 --batch-size 32 --workers 8 --pin-memory \
                                 --compile --warmup-steps 60 --profile
+run "5 + batch 64"              --run-name s5_batch64   --precision bf16 --batch-size 64 --workers 8 --pin-memory                                 --compile --warmup-steps 60
+run "6 + batch 128"             --run-name s6_batch128  --precision bf16 --batch-size 128 --workers 8 --pin-memory                                 --compile --warmup-steps 60
 
 echo; python summarize.py results
 echo "Finished at $(date)"

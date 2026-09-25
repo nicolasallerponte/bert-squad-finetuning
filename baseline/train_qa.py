@@ -218,6 +218,12 @@ def main():
 
     model = AutoModelForQuestionAnswering.from_pretrained(args.model).to(device)
     n_params = sum(p.numel() for p in model.parameters())
+    # FLOPs per token (Kaplan et al., 2020): 6 x non-embedding params + attention term.
+    # Embedding lookups do no matrix multiplication, so they are excluded.
+    n_emb = sum(p.numel() for n, p in model.named_parameters() if "embeddings" in n)
+    cfg = model.config
+    flops_per_token = 6 * (n_params - n_emb) + 6 * cfg.num_hidden_layers * args.max_len * cfg.hidden_size
+    flops_per_sample = flops_per_token * args.max_len
     if args.compile:
         model = torch.compile(model)
 
@@ -232,7 +238,8 @@ def main():
     run_name = args.run_name or (f"bs{args.batch_size}_{args.precision}_w{args.workers}"
                                  f"{'_pin' if args.pin_memory else ''}{'_compile' if args.compile else ''}")
     print(f"Run: {run_name} | host {socket.gethostname()} | {torch.cuda.get_device_name(0)}")
-    print(f"torch {torch.__version__} (CUDA {torch.version.cuda}) | params {n_params/1e6:.1f} M")
+    print(f"torch {torch.__version__} (CUDA {torch.version.cuda}) | params {n_params/1e6:.1f} M "
+          f"({(n_params - n_emb)/1e6:.1f} M non-embedding) | {flops_per_sample/1e9:.0f} GFLOP/sample")
     print(f"train features {len(data['train'])} | steps/epoch {steps_per_epoch} | total steps {total_steps}",
           flush=True)
 
@@ -289,11 +296,11 @@ def main():
     # ---------------- results
     res = dict(run=run_name, date=datetime.now().isoformat(timespec="seconds"), host=socket.gethostname(),
                gpu=torch.cuda.get_device_name(0), torch=torch.__version__, **{k: v for k, v in vars(args).items()},
-               total_steps=step, wall_time_s=round(wall, 2),
+               total_steps=step, wall_time_s=round(wall, 2), params=n_params,
+               non_embedding_params=n_params - n_emb, gflops_per_sample=round(flops_per_sample / 1e9, 1),
                peak_mem_gb=round(torch.cuda.max_memory_allocated() / 1e9, 2))
     if measured_steps:
         sps = measured_steps * args.batch_size / measured_time
-        flops_per_sample = 6 * n_params * args.max_len        # training ~ 6 x params x tokens
         achieved_tflops = sps * flops_per_sample / 1e12
         res.update(samples_per_s=round(sps, 1), step_time_ms=round(1000 * measured_time / measured_steps, 1),
                    achieved_tflops=round(achieved_tflops, 1),

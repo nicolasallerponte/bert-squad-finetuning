@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full training run (1 epoch) with ALL the optimizations, to compare against run_baseline.sh.
+# Full training run (2 epochs) with ALL the optimizations, to compare against run_baseline.sh.
 # Adjust the flags to the best configuration found with run_improvements.sh.
 #   mkdir -p logs && sbatch run_final.sh
 #SBATCH --job-name=bert-final
@@ -20,7 +20,7 @@ cd "$SLURM_SUBMIT_DIR"
 echo "Job $SLURM_JOB_ID on $(hostname) at $(date)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 
-python train_qa.py --epochs 1 --precision bf16 --batch-size 32 --workers 8 --pin-memory --compile \
+python train_qa.py --epochs 2 --precision bf16 --batch-size 32 --workers 8 --pin-memory --compile \
                    --warmup-steps 60 --run-name final_full
 
 echo "Finished at $(date)"

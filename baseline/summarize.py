@@ -14,6 +14,10 @@ for path in glob.glob(os.path.join(folder, "*.json")):
     with open(path) as f:
         rows.append(json.load(f))
 rows.sort(key=lambda r: r.get("date", ""))
+latest = {}                      # keep only the most recent result of each run name
+for r in rows:
+    latest[r["run"]] = r
+rows = list(latest.values())
 if not rows:
     sys.exit(f"No results in {folder}/")
 

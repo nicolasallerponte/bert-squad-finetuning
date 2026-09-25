@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full training run of the BASELINE (1 epoch) on one A100.
+# Full training run of the BASELINE (2 epochs) on one A100.
 #   mkdir -p logs && sbatch run_baseline.sh
 #SBATCH --job-name=bert-baseline
 #SBATCH --nodes=1
@@ -20,7 +20,7 @@ echo "Job $SLURM_JOB_ID on $(hostname) at $(date)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 
 # Baseline: FP32, no DataLoader workers, no pinned memory, batch 16, no compilation.
-python train_qa.py --epochs 1 --batch-size 16 --precision fp32 --workers 0 \
+python train_qa.py --epochs 2 --batch-size 16 --precision fp32 --workers 0 \
                    --run-name baseline_full --profile
 
 echo "Finished at $(date)"
