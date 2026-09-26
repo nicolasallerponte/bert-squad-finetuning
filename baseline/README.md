@@ -93,11 +93,11 @@ larger batches have simply seen more samples. Quality is compared in 5.2.
 | Configuration | Batch | Throughput | Training time | Validation loss |
 |---|---|---|---|---|
 | Baseline (FP32, no workers) | 16 | 65.9 samples/s | **2,739.8 s (45.7 min)** | 0.961 |
-| Optimized (BF16, workers, `torch.compile`) | 64 | TODO | TODO | TODO |
-| **Speedup** | | | **TODO** | |
+| Optimized (BF16, workers, `torch.compile`) | 64 | 463.1 samples/s | **446.1 s (7.4 min)** | 0.990 |
+| **Speedup** | | **7.03x** | **6.14x** | +3.0 % |
 
-The baseline ran 11,060 steps (5,530 per epoch); its training loss went from 5.76 at step 100 to
-0.74 at step 11,000.
+The baseline ran 11,060 steps (5,530 per epoch) and the optimized run 2,764 (1,382 per epoch).
+Both evaluated the same 1,600 validation samples.
 
 ### 5.3 Profiler
 
@@ -163,6 +163,18 @@ batch 32) because fewer intermediate tensors are kept.
 **Amdahl in the profile.** Once the matrix products run on Tensor Cores, attention becomes a much
 larger share of the time: the attention backward kernel goes from 6.1 % to 19.7 % of the GPU time.
 Speeding up one part makes the rest weigh more; attention is now the next target.
+
+**Training time improves less than throughput (6.14x against 7.03x).** Multiplying the steps by
+the measured time per step gives 2,685 s for the baseline and 382 s for the optimized run; the
+rest of the wall time (54 s and 64 s) are fixed costs: start-up, warmup and, above all,
+compilation. They are about the same in both runs, but they weigh far more in a 7-minute run than
+in a 45-minute one. This is Amdahl's law again: the part that was not accelerated limits the
+total speedup, and it would matter less in a longer training.
+
+**The model quality is preserved.** On the same 1,600 validation samples the loss is 0.990,
+3 % above the baseline (0.961). The optimized run makes 4 times fewer optimizer updates (batch 64
+against 16) with the same learning rate; scaling the learning rate with the batch size would
+likely close the gap, but tuning hyperparameters is outside the scope of this deliverable.
 
 **Why the MFU stays around 30 %.** Matrix products are fast, but the rest of the step is not:
 attention, memory-bound element-wise operations, the optimizer update and the per-step CPU
