@@ -20,7 +20,8 @@ echo "Job $SLURM_JOB_ID on $(hostname) at $(date)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 
 # Baseline: FP32, no DataLoader workers, no pinned memory, batch 16, no compilation.
+# At the end, exact match and F1 on the whole SQuAD validation split.
 python train_qa.py --epochs 2 --batch-size 16 --precision fp32 --workers 0 \
-                   --run-name baseline_full --profile
+                   --run-name baseline_full --squad-eval
 
 echo "Finished at $(date)"

@@ -21,7 +21,12 @@ echo "Job $SLURM_JOB_ID on $(hostname) at $(date)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 
 # Batch 64: 96 % of the throughput of batch 128 with half the memory (see run_improvements.sh).
-python train_qa.py --epochs 2 --precision bf16 --batch-size 64 --workers 8 --pin-memory --compile \
-                   --warmup-steps 60 --run-name final_full
+OPT="--epochs 2 --precision bf16 --batch-size 64 --workers 8 --pin-memory --compile --fused-adam
+     --warmup-steps 60 --squad-eval"
+python train_qa.py $OPT --run-name final_full
+
+# Same run with the learning rate doubled: batch 64 makes 4 times fewer optimizer updates than
+# the baseline, and this checks whether the small quality gap comes from that.
+python train_qa.py $OPT --lr 6e-5 --run-name final_full_lr6e-5
 
 echo "Finished at $(date)"

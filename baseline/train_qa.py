@@ -9,6 +9,7 @@ produces the baseline and each improvement, and they can be compared one by one:
     --precision {fp32,tf32,bf16,fp16}
     --batch-size N
     --compile                    torch.compile
+    --fused-adam                 AdamW as a single fused CUDA kernel
 
 Throughput is measured over --measure-steps steps AFTER --warmup-steps steps, because the
 first iterations pay for CUDA context creation, memory-pool growth and compilation.
@@ -24,8 +25,11 @@ import json
 import math
 import os
 import random
+import re
 import socket
+import string
 import time
+from collections import Counter
 from datetime import datetime
 
 import numpy as np
@@ -53,6 +57,7 @@ def parse_args():
     p.add_argument("--pin-memory", action="store_true")
     p.add_argument("--precision", choices=["fp32", "tf32", "bf16", "fp16"], default="fp32")
     p.add_argument("--compile", action="store_true", help="torch.compile the model")
+    p.add_argument("--fused-adam", action="store_true", help="fused CUDA implementation of AdamW")
 
     # measurement
     p.add_argument("--warmup-steps", type=int, default=20, help="steps excluded from throughput")
@@ -61,6 +66,8 @@ def parse_args():
     p.add_argument("--profile", action="store_true", help="run torch.profiler for a few steps")
     p.add_argument("--eval-samples", type=int, default=1600,
                    help="validation samples evaluated at the end, always the same ones (0 = skip)")
+    p.add_argument("--squad-eval", action="store_true",
+                   help="after training, exact match and F1 on the whole SQuAD validation split")
 
     p.add_argument("--run-name", default=None)
     p.add_argument("--results-dir", default="results")
@@ -192,6 +199,77 @@ def evaluate(model, loader, args, device):
     return total / max(n, 1)
 
 
+# --------------------------------------------------------------------------- SQuAD metrics
+def normalize_answer(s):
+    """Normalization of the official SQuAD v1.1 script: lower case, no punctuation, no articles."""
+    s = "".join(ch for ch in s.lower() if ch not in set(string.punctuation))
+    s = re.sub(r"\b(a|an|the)\b", " ", s)
+    return " ".join(s.split())
+
+
+def f1_score(prediction, truth):
+    pred, gold = normalize_answer(prediction).split(), normalize_answer(truth).split()
+    common = sum((Counter(pred) & Counter(gold)).values())
+    if common == 0:
+        return 0.0
+    precision, recall = common / len(pred), common / len(gold)
+    return 2 * precision * recall / (precision + recall)
+
+
+def squad_metrics(predictions, answers):
+    """Exact match and F1 (in %), each prediction scored against its best reference answer."""
+    em = f1 = 0.0
+    for pred, refs in zip(predictions, answers):
+        em += max(float(normalize_answer(pred) == normalize_answer(r)) for r in refs)
+        f1 += max(f1_score(pred, r) for r in refs)
+    return 100 * em / len(answers), 100 * f1 / len(answers)
+
+
+def extract_answers(start_logits, end_logits, feats, contexts, n_best=20, max_answer_len=30):
+    """For every example, the highest scoring valid span over all its windows (standard HF
+    post-processing): start and end inside the context, end >= start, at most max_answer_len tokens."""
+    best = [(-float("inf"), "") for _ in contexts]
+    starts = torch.topk(start_logits, n_best, dim=1)
+    ends = torch.topk(end_logits, n_best, dim=1)
+    for i, ex in enumerate(feats["overflow_to_sample_mapping"]):
+        offsets, seq_ids = feats["offset_mapping"][i], feats.sequence_ids(i)
+        for s_score, s in zip(starts.values[i].tolist(), starts.indices[i].tolist()):
+            if seq_ids[s] != 1:
+                continue
+            for e_score, e in zip(ends.values[i].tolist(), ends.indices[i].tolist()):
+                if seq_ids[e] != 1 or e < s or e - s + 1 > max_answer_len:
+                    continue
+                if s_score + e_score > best[ex][0]:
+                    best[ex] = (s_score + e_score, contexts[ex][offsets[s][0]:offsets[e][1]])
+    return [text for _, text in best]
+
+
+@torch.no_grad()
+def squad_evaluate(model, tokenizer, args, device):
+    """Exact match and F1 on the whole validation split, as reported for SQuAD v1.1."""
+    from datasets import load_dataset
+
+    raw = load_dataset("rajpurkar/squad", split="validation")
+    contexts = list(raw["context"])                 # recent datasets return a Column, not a list
+    feats = tokenizer([q.lstrip() for q in raw["question"]], contexts,
+                      truncation="only_second", max_length=args.max_len, stride=args.stride,
+                      return_overflowing_tokens=True, return_offsets_mapping=True, padding="max_length")
+    model = getattr(model, "_orig_mod", model)      # the eager module: the last batch is smaller
+    model.eval()
+    keys = ("input_ids", "token_type_ids", "attention_mask")
+    starts, ends = [], []
+    for b in range(0, len(feats["input_ids"]), args.batch_size):
+        batch = {k: torch.tensor(feats[k][b:b + args.batch_size], device=device) for k in keys}
+        with autocast_ctx(args.precision):
+            out = model(**batch)
+        starts.append(out.start_logits.float().cpu())
+        ends.append(out.end_logits.float().cpu())
+    model.train()
+    preds = extract_answers(torch.cat(starts), torch.cat(ends), feats, contexts)
+    em, f1 = squad_metrics(preds, [a["text"] for a in raw["answers"]])
+    return dict(exact_match=round(em, 2), f1=round(f1, 2), squad_examples=len(raw))
+
+
 # --------------------------------------------------------------------------- main
 def main():
     args = parse_args()
@@ -233,7 +311,7 @@ def main():
 
     steps_per_epoch = len(train_loader)
     total_steps = args.max_steps or steps_per_epoch * args.epochs
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, fused=args.fused_adam)
     warm = max(1, int(0.1 * total_steps))     # linear warmup (10 %) then linear decay
     lr_sched = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda s: min((s + 1) / warm, max(0.0, (total_steps - s) / max(1, total_steps - warm))))
@@ -298,9 +376,12 @@ def main():
     wall = time.perf_counter() - t_start
 
     # ---------------- results
+    config = {k: v for k, v in vars(args).items() if k not in ("data_dir", "results_dir")}   # no local paths
     res = dict(run=run_name, date=datetime.now().isoformat(timespec="seconds"), host=socket.gethostname(),
-               gpu=torch.cuda.get_device_name(0), torch=torch.__version__, **{k: v for k, v in vars(args).items()},
-               total_steps=step, wall_time_s=round(wall, 2), params=n_params,
+               gpu=torch.cuda.get_device_name(0), torch=torch.__version__, **config,
+               total_steps=step, wall_time_s=round(wall, 2),
+               avg_samples_per_s=round(step * args.batch_size / wall, 1),   # whole run, not a window
+               params=n_params,
                non_embedding_params=n_params - n_emb, gflops_per_sample=round(flops_per_sample / 1e9, 1),
                peak_mem_gb=round(torch.cuda.max_memory_allocated() / 1e9, 2))
     if measured_steps:
@@ -314,14 +395,16 @@ def main():
         print("WARNING: not enough steps to measure throughput (increase --max-steps).")
     if args.eval_samples:
         res["val_loss"] = round(evaluate(model, val_loader, args, device), 4)
+    if args.squad_eval:
+        res.update(squad_evaluate(model, tokenizer, args, device))
 
     os.makedirs(args.results_dir, exist_ok=True)
     out = os.path.join(args.results_dir, f"{run_name}_{os.environ.get('SLURM_JOB_ID', 'local')}.json")
     with open(out, "w") as f:
         json.dump(res, f, indent=2)
     print("\n===== RESULT =====")
-    for k in ("run", "samples_per_s", "step_time_ms", "achieved_tflops", "mfu_pct", "peak_mem_gb",
-              "wall_time_s", "val_loss"):
+    for k in ("run", "samples_per_s", "avg_samples_per_s", "step_time_ms", "achieved_tflops", "mfu_pct",
+              "peak_mem_gb", "wall_time_s", "val_loss", "exact_match", "f1"):
         if k in res:
             print(f"  {k:<16} {res[k]}")
     print(f"  saved to {out}")
