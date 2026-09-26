@@ -20,7 +20,8 @@ cd "$SLURM_SUBMIT_DIR"
 echo "Job $SLURM_JOB_ID on $(hostname) at $(date)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 
-python train_qa.py --epochs 2 --precision bf16 --batch-size 32 --workers 8 --pin-memory --compile \
+# Batch 64: 96 % of the throughput of batch 128 with half the memory (see run_improvements.sh).
+python train_qa.py --epochs 2 --precision bf16 --batch-size 64 --workers 8 --pin-memory --compile \
                    --warmup-steps 60 --run-name final_full
 
 echo "Finished at $(date)"

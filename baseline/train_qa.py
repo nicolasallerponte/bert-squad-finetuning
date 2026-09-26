@@ -59,7 +59,8 @@ def parse_args():
     p.add_argument("--measure-steps", type=int, default=100, help="steps used to measure throughput")
     p.add_argument("--log-every", type=int, default=100)
     p.add_argument("--profile", action="store_true", help="run torch.profiler for a few steps")
-    p.add_argument("--eval-batches", type=int, default=100, help="validation batches at the end (0 = skip)")
+    p.add_argument("--eval-samples", type=int, default=1600,
+                   help="validation samples evaluated at the end, always the same ones (0 = skip)")
 
     p.add_argument("--run-name", default=None)
     p.add_argument("--results-dir", default="results")
@@ -176,9 +177,12 @@ def run_profiler(model, loader, optimizer, scaler, args, device):
 @torch.no_grad()
 def evaluate(model, loader, args, device):
     model.eval()                         # dropout off; forgetting this silently changes the model
+    # A fixed number of SAMPLES, not of batches: with shuffle=False the first N validation
+    # samples are the same whatever the batch size, so runs with different batches are comparable.
+    n_batches = args.eval_samples // args.batch_size
     total, n = 0.0, 0
     for i, batch in enumerate(loader):
-        if i >= args.eval_batches:
+        if i >= n_batches:
             break
         batch = {k: v.to(device, non_blocking=args.pin_memory) for k, v in batch.items()}
         with autocast_ctx(args.precision):
@@ -308,7 +312,7 @@ def main():
                    peak_tflops_used=PEAK_TFLOPS[args.precision])
     else:
         print("WARNING: not enough steps to measure throughput (increase --max-steps).")
-    if args.eval_batches:
+    if args.eval_samples:
         res["val_loss"] = round(evaluate(model, val_loader, args, device), 4)
 
     os.makedirs(args.results_dir, exist_ok=True)
