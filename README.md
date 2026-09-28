@@ -4,8 +4,8 @@ Deliverables for the *HPC for AI* block of HPC Tools (Máster HPC, UDC/USC, 2026
 
 | Folder | Deliverable | Git tag |
 |---|---|---|
-| [`baseline/`](baseline/) | 1: single-GPU baseline and its optimization | `baseline` |
-| `distributed/` | 2: multi-node, multi-GPU training | `distributed` |
+| [`BASELINE/`](BASELINE/) | 1: single-GPU baseline and its optimization | `BASELINE` |
+| `DISTRIBUTED/` | 2: multi-node, multi-GPU training | `DISTRIBUTED` |
 
 ## Environment (FinisTerrae III)
 

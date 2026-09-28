@@ -8,7 +8,7 @@ with the single-GPU optimizations of the course, applied one at a time.
 
 | | |
 |---|---|
-| Model | `bert-base-uncased`: 108.9 M parameters, 85.1 M of them outside the embeddings |
+| Model | [`google-bert/bert-base-uncased`](https://huggingface.co/google-bert/bert-base-uncased) (loaded by its short name `bert-base-uncased`): 108.9 M parameters, 85.1 M of them outside the embeddings |
 | Data | SQuAD v1.1, windows of 384 tokens with a stride of 128: **88,492 training** and 10,753 validation features |
 | Training | AdamW, learning rate 3e-5 with 10 % linear warmup and linear decay, **2 epochs** |
 | Hardware | 1 x A100-PCIE-40GB (driver 570.86.15, CUDA 12.8), 32 CPU cores |
@@ -24,7 +24,7 @@ with the single-GPU optimizations of the course, applied one at a time.
 | `run_baseline.sh` | SLURM job: full training (2 epochs) with the baseline configuration |
 | `run_final.sh` | SLURM job: full training (2 epochs) with every optimization |
 | `summarize.py` | Builds the results table from `results/*.json` |
-| `results/*.json` | Raw measurements of every run |
+| `results/` | Raw measurements of every run (JSON); the runs reported below are in `results/2026-09-24-first-round/` |
 
 To reproduce:
 
