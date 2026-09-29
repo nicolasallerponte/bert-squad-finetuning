@@ -36,7 +36,7 @@ LABELS = {
 }
 GROUPS = ["matmul", "attention", "element-wise and other", "optimizer", "memory copies"]
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]    # fixed order, one per group
-SURFACE, TEXT, TEXT2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3dd"
+SURFACE, TEXT, TEXT2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e4e3dd"
 
 plt.rcParams.update({
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,

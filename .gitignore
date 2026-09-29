@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 logs/
 # results/*.json ARE committed: they are the evidence behind the report
+
+# LaTeX build files
+BASELINE/report/*.aux
+BASELINE/report/*.log
+BASELINE/report/*.out
