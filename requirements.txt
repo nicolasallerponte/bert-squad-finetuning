@@ -4,3 +4,4 @@
 transformers
 datasets
 numpy
+matplotlib        # only for plots.py (figures of the report)
