@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Figures of the report, from results/*.json:
+"""Figures of the report, from results/*.json and the profiler traces in profiles/:
 
-    figures/throughput.png   samples/s of each optimization step (median and range of the repetitions)
-    figures/profile.png      share of the GPU time of each kernel group, per step (torch.profiler)
-    figures/loss.png         training loss against time, baseline and optimized full runs
+    throughput.png   samples/s of each optimization step (median and range of the repetitions)
+    profile.png      share of the GPU time of each kernel group, per step (torch.profiler)
+    loss.png         training loss against time, baseline and optimized full runs
+
+Each figure is drawn twice: figures/ for the README and figures/column/ at the width of one
+column of the PDF report.
 
     python plots.py results
 """
@@ -21,13 +24,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 folder = sys.argv[1] if len(sys.argv) > 1 else "results"
-out_dir = "figures"
 
 LABELS = {
-    "s0_baseline": "Baseline: FP32, batch 16",
-    "s1_pipeline": "+ 8 workers, pinned memory",
+    "s0_baseline": "FP32, batch 16",
+    "s1_pipeline": "+ workers, pinned",
     "s2_tf32": "+ TF32",
-    "s3_bf16": "+ BF16 mixed precision",
+    "s3_bf16": "+ BF16",
     "s4_batch32": "+ batch 32",
     "s5_compile": "+ torch.compile",
     "s6_fused_adam": "+ fused AdamW",
@@ -37,14 +39,12 @@ LABELS = {
 GROUPS = ["matmul", "attention", "element-wise and other", "optimizer", "memory copies"]
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]    # fixed order, one per group
 SURFACE, TEXT, TEXT2, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e4e3dd"
+STYLES = {                                             # output folder: (width in inches, font size)
+    "figures": (8.0, 10),
+    os.path.join("figures", "column"): (3.4, 7.5),
+}
 
-plt.rcParams.update({
-    "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
-    "font.size": 10, "text.color": TEXT, "axes.labelcolor": TEXT2, "xtick.color": TEXT2,
-    "ytick.color": TEXT, "axes.edgecolor": GRID, "axes.spines.top": False, "axes.spines.right": False,
-    "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.8, "axes.axisbelow": True,
-})
-
+# ---------------------------------------------------------------- data
 rows = []
 for path in glob.glob(os.path.join(folder, "*.json")):
     with open(path) as f:
@@ -57,37 +57,8 @@ for r in latest.values():
     if re.match(r"s\d+_", name):
         steps.setdefault(name, []).append(r)
 order = sorted(steps, key=lambda n: int(re.match(r"s(\d+)_", n).group(1)))
-os.makedirs(out_dir, exist_ok=True)
 
 
-def save(fig, name):
-    path = os.path.join(out_dir, name)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("written", path)
-
-
-# ---------------------------------------------------------------- 1. throughput per step
-if order:
-    med = [statistics.median(r["samples_per_s"] for r in steps[n]) for n in order]
-    lo = [min(r["samples_per_s"] for r in steps[n]) for n in order]
-    hi = [max(r["samples_per_s"] for r in steps[n]) for n in order]
-    y = range(len(order))[::-1]                       # step 0 at the top
-    fig, ax = plt.subplots(figsize=(8, 0.45 * len(order) + 1.2))
-    ax.barh(y, med, height=0.6, color=COLORS[0])
-    if any(h > l for l, h in zip(lo, hi)):
-        ax.errorbar(med, y, xerr=[[m - l for m, l in zip(med, lo)], [h - m for m, h in zip(med, hi)]],
-                    fmt="none", ecolor=TEXT2, elinewidth=1, capsize=3)
-    for yi, m, h in zip(y, med, hi):
-        ax.text(h + max(med) * 0.01, yi, f"{m / med[0]:.2f}x", va="center", color=TEXT, fontsize=9)
-    ax.set_yticks(list(y), [LABELS.get(n, n) for n in order])
-    ax.set_xlabel("training throughput (samples/s)")
-    ax.set_xlim(0, max(hi) * 1.12)
-    ax.grid(axis="y", visible=False)
-    ax.set_title("Throughput after each optimization, applied cumulatively", loc="left", fontsize=11)
-    save(fig, "throughput.png")
-
-# ---------------------------------------------------------------- 2. profiler breakdown per step
 def trace_breakdown(run):
     """Share of the GPU time of each kernel group, from the torch.profiler trace of a run.
 
@@ -125,42 +96,88 @@ if prof:
     print("GPU time share (%): step | " + " | ".join(GROUPS))
     for n, b in prof:
         print(f"  {n} | " + " | ".join(f"{b.get(g, 0.0):.1f}" for g in GROUPS))
+full = [(n, latest.get(n)) for n in ("baseline_full", "final_full")]
+full = [(n, r) for n, r in full if r and r.get("loss_curve")]
+
+
+# ---------------------------------------------------------------- figures
+def save(fig, out_dir, name):
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, name)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print("written", path)
+
+
+def throughput(width, fs, out_dir):
+    med = [statistics.median(r["samples_per_s"] for r in steps[n]) for n in order]
+    lo = [min(r["samples_per_s"] for r in steps[n]) for n in order]
+    hi = [max(r["samples_per_s"] for r in steps[n]) for n in order]
+    y = range(len(order))[::-1]                       # step 0 at the top
+    fig, ax = plt.subplots(figsize=(width, 0.055 * width * len(order) + 0.5))
+    ax.barh(y, med, height=0.6, color=COLORS[0])
+    if any(h > l for l, h in zip(lo, hi)):
+        ax.errorbar(med, y, xerr=[[m - l for m, l in zip(med, lo)], [h - m for m, h in zip(med, hi)]],
+                    fmt="none", ecolor=TEXT2, elinewidth=0.8, capsize=2)
+    for yi, m, h in zip(y, med, hi):
+        ax.text(h + max(med) * 0.015, yi, f"{m / med[0]:.2f}x", va="center", color=TEXT, fontsize=fs * 0.9)
+    ax.set_yticks(list(y), [LABELS.get(n, n) for n in order])
+    ax.set_xlabel("training throughput (samples/s)")
+    ax.set_xlim(0, max(hi) * 1.15)
+    ax.grid(axis="y", visible=False)
+    save(fig, out_dir, "throughput.png")
+
+
+def profile(width, fs, out_dir):
     y = range(len(prof))[::-1]
-    fig, ax = plt.subplots(figsize=(8, 0.45 * len(prof) + 1.6))
+    fig, ax = plt.subplots(figsize=(width, 0.055 * width * len(prof) + 0.8))
     left = [0.0] * len(prof)
     for g, color in zip(GROUPS, COLORS):
         vals = [p.get(g, 0.0) for _, p in prof]
-        if max(vals) < 0.5:                               # invisible at this scale (memory copies)
+        if max(vals) < 0.5:                           # invisible at this scale (memory copies)
             continue
-        ax.barh(y, vals, left=left, height=0.6, color=color, edgecolor=SURFACE, linewidth=2, label=g)
-        if g in ("matmul", "attention"):                  # the two shares the discussion refers to
+        ax.barh(y, vals, left=left, height=0.6, color=color, edgecolor=SURFACE, linewidth=1.5, label=g)
+        if g in ("matmul", "attention"):              # the two shares the discussion refers to
             for yi, l0, v in zip(y, left, vals):
-                if v >= 9:
-                    ax.text(l0 + v / 2, yi, f"{v:.0f} %", ha="center", va="center", color="white", fontsize=8.5)
+                if v >= 12:
+                    ax.text(l0 + v / 2, yi, f"{v:.0f} %", ha="center", va="center", color="white",
+                            fontsize=fs * 0.85)
         left = [a + b for a, b in zip(left, vals)]
     ax.set_yticks(list(y), [LABELS.get(n, n) for n, _ in prof])
-    ax.set_xlabel("share of the GPU time (%), torch.profiler")
+    ax.set_xlabel("share of the GPU time (%)")
     ax.set_xlim(0, 100)
     ax.grid(axis="y", visible=False)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=5, frameon=False, fontsize=8.5)
-    ax.set_title("Where the GPU time goes", loc="left", fontsize=11, pad=24)
-    save(fig, "profile.png")
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4 if width > 5 else 2, frameon=False,
+              fontsize=fs * 0.9, handlelength=1.2, columnspacing=1.2)
+    save(fig, out_dir, "profile.png")
 
-# ---------------------------------------------------------------- 3. loss against time
-full = [(name, latest.get(name)) for name in ("baseline_full", "final_full")]
-full = [(n, r) for n, r in full if r and r.get("loss_curve")]
-if full:
-    fig, ax = plt.subplots(figsize=(8, 4))
-    names = {"baseline_full": "Baseline (FP32, batch 16)", "final_full": "Optimized (BF16, batch 64, compiled)"}
+
+def loss(width, fs, out_dir):
+    fig, ax = plt.subplots(figsize=(width, width * 0.5))
+    names = {"baseline_full": "Baseline (FP32, batch 16)", "final_full": "Optimized (BF16, batch 64)"}
     for (n, r), color in zip(full, COLORS):
-        _, t, loss = zip(*r["loss_curve"])
+        _, t, values = zip(*r["loss_curve"])
         minutes = [s / 60 for s in t]
-        ax.plot(minutes, loss, color=color, linewidth=2, label=names.get(n, n))
-        ax.annotate(f"{r['wall_time_s'] / 60:.1f} min", (minutes[-1], loss[-1]), xytext=(6, 0),
-                    textcoords="offset points", va="center", color=TEXT, fontsize=9)
+        ax.plot(minutes, values, color=color, linewidth=1.5 if width < 5 else 2, label=names.get(n, n))
+        ax.annotate(f"{r['wall_time_s'] / 60:.1f} min", (minutes[-1], values[-1]), xytext=(4, 0),
+                    textcoords="offset points", va="center", color=TEXT, fontsize=fs * 0.9)
     ax.set_xlabel("training time (minutes)")
-    ax.set_ylabel("training loss (mean of 100 steps)")
+    ax.set_ylabel("training loss")
     ax.set_ylim(bottom=0)
     ax.legend(frameon=False)
-    ax.set_title("Same training, 2 epochs: loss against wall-clock time", loc="left", fontsize=11)
-    save(fig, "loss.png")
+    save(fig, out_dir, "loss.png")
+
+
+for out_dir, (width, fs) in STYLES.items():
+    plt.rcParams.update({
+        "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
+        "font.size": fs, "text.color": TEXT, "axes.labelcolor": TEXT2, "xtick.color": TEXT2,
+        "ytick.color": TEXT, "axes.edgecolor": GRID, "axes.spines.top": False, "axes.spines.right": False,
+        "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.6, "axes.axisbelow": True,
+    })
+    if order:
+        throughput(width, fs, out_dir)
+    if prof:
+        profile(width, fs, out_dir)
+    if full:
+        loss(width, fs, out_dir)

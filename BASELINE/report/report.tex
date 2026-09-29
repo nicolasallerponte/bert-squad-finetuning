@@ -1,8 +1,8 @@
-\documentclass[11pt,a4paper]{article}
+\documentclass[10pt,a4paper,twocolumn]{article}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage[margin=2.3cm]{geometry}
+\usepackage[margin=1.8cm,columnsep=0.7cm]{geometry}
 \usepackage{microtype}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -11,63 +11,105 @@
 \usepackage{enumitem}
 \usepackage{float}
 \setlist{nosep,leftmargin=*}
-\graphicspath{{../figures/}}
+\graphicspath{{../figures/column/}}
+\raggedbottom
 \newcommand{\x}{$\times$}
+\setlength{\parskip}{3pt}
 
-\title{Accelerating BERT-base training on a single A100\\[4pt]
+\title{Accelerating BERT-base training on a single A100\\[3pt]
 \large HPC Tools, Lab AI: deliverable 1 (BASELINE)}
 \author{Nicolás Aller Ponte}
 \date{30 September 2026}
 
 \begin{document}
+\twocolumn[
+\begin{@twocolumnfalse}
 \maketitle
-
 \begin{abstract}
 \noindent
 We fine-tune BERT-base for question answering on SQuAD v1.1 on one NVIDIA A100 of FinisTerrae III
 and apply the single-GPU optimizations of the course one at a time, profiling each of them.
 Two epochs take 45.8 minutes in the FP32 baseline and 7.2 minutes once optimized, a 6.4\x{}
-speedup, while F1 drops by one point (87.97 to 86.97). Precision is the decisive lever; the
-remaining optimizations each remove the bottleneck exposed by the previous one.
+speedup, while F1 drops by one point (87.97 to 86.97).
 \end{abstract}
+\vspace{1em}
+\end{@twocolumnfalse}
+]
 
 \section{Setup and method}
 
-The model is \texttt{google-bert/bert-base-uncased} (109\,M parameters), trained for 2 epochs with
-AdamW (learning rate $3\cdot10^{-5}$, 10\,\% linear warmup, then linear decay) on 88,492
-training windows of 384 tokens. All runs use one A100-PCIE-40GB and 32 CPU cores, with
-PyTorch 2.11 built for CUDA 12.8.
+The model is \texttt{google-bert/bert-base-uncased} (109\,M parameters), trained for two epochs
+with AdamW (learning rate $3\cdot10^{-5}$, 10\,\% linear warmup, then linear decay) on 88,492
+windows of 384 tokens, with PyTorch 2.11 built for CUDA 12.8.
 
 \begin{itemize}
   \item \textbf{Throughput} is measured over 100 steps after a warmup of 30 steps (60 with
         \texttt{torch.compile}), between two \texttt{torch.cuda.synchronize()} calls.
   \item Each configuration runs \textbf{three times}; we report the median and the range.
-  \item \texttt{torch.profiler} records five steps per configuration. We report the \emph{share}
-        of GPU time per kernel group: shares are comparable across configurations, whereas
+  \item \texttt{torch.profiler} records five steps per configuration. We report the
+        \emph{share} of GPU time per kernel group, which is comparable across configurations;
         absolute times are not, since the profiled steps are the first ones of each run.
-  \item The baseline is true FP32 (TF32 disabled), and quality is measured with the official
-        SQuAD exact match and F1 on the full validation set.
+  \item The baseline is true FP32 (TF32 disabled). Quality is measured with the official SQuAD
+        exact match (EM) and F1 on the full validation set.
 \end{itemize}
 
-\section{Deployment on FinisTerrae III}
+\section{Running on FinisTerrae III}
 
-Most of the effort went into running the code correctly on the cluster (Table~\ref{tab:deploy}).
+\subsection{Resources requested}
+
+The work is split into four SLURM jobs (Table~\ref{tab:resources}).
 
 \begin{table}[H]
-\centering\small
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\caption{Resources requested per job, and actual run time.}
+\label{tab:resources}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Job & GPU & Cores & Memory & Limit & Actual \\
+\midrule
+\texttt{prepare\_data} & none & 8 & 4\,GB & 0.5\,h & $<$\,0.5\,h \\
+\texttt{run\_improvements} & 1 A100 & 32 & 64\,GB & 3\,h & 31\,min \\
+\texttt{run\_baseline} & 1 A100 & 32 & 64\,GB & 3\,h & 48\,min \\
+\texttt{run\_final} & 1 A100 & 32 & 64\,GB & 2\,h & 10\,min \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{itemize}
+  \item \textbf{One A100 per job}, as the deliverable requires: the training script uses a
+        single GPU, so more GPUs would sit idle.
+  \item \textbf{32 cores}, because FT3 rejects GPU jobs with any other count per A100; eight
+        of them run the DataLoader workers.
+  \item \textbf{64\,GB of memory}, a generous margin for the tokenized dataset held in memory
+        and the eight worker processes.
+  \item \textbf{Time limits} of two to three times the expected duration, so that a slow node
+        does not kill a run, and always below 6\,h, which places the jobs in the
+        \texttt{short} QoS, the one with the highest priority.
+  \item \textbf{Tokenization runs in a CPU-only job} (8 processes, 0.5\,GB peak), so no GPU
+        time is spent on it and it is not counted as training time.
+  \item The three GPU jobs are independent, so they were submitted at once on three GPUs: the
+        whole set of measurements took 53 minutes.
+\end{itemize}
+
+\subsection{Deployment issues}
+
+\begin{table}[H]
+\centering\footnotesize
 \caption{Deployment issues and their solutions.}
 \label{tab:deploy}
-\begin{tabular}{p{7.4cm}p{7.4cm}}
+\begin{tabular}{@{}p{0.47\columnwidth}p{0.47\columnwidth}@{}}
 \toprule
 Issue & Solution \\
 \midrule
-The default PyTorch wheel targets CUDA 13; the A100 driver (570.86.15) supports up to 12.8 &
+Default PyTorch wheel built for CUDA 13; the driver (570.86.15) supports up to 12.8 &
 Install PyTorch from the CUDA 12.8 index \\
-\texttt{python/3.10.10} is not available & \texttt{module load cesga/2020 python/3.10.8} \\
-A GPU job with 4 cores is rejected & Exactly 32 cores per A100 \\
-\texttt{\$HOME} quota is 20\,GB & Virtual environment and Hugging Face cache in \texttt{\$STORE} \\
-Tokenizing in the training job would count as training time & A separate CPU job tokenizes once \\
-Long jobs queue longer & Jobs under 6\,h run in the high-priority \texttt{short} QoS \\
+\addlinespace
+\texttt{python/3.10.10} not available & \texttt{cesga/2020 python/3.10.8} \\
+\addlinespace
+GPU job with 4 cores rejected & Exactly 32 cores per A100 \\
+\addlinespace
+\texttt{\$HOME} quota of 20\,GB & venv and model cache in \texttt{\$STORE} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -76,28 +118,33 @@ Long jobs queue longer & Jobs under 6\,h run in the high-priority \texttt{short}
 
 \subsection{One optimization at a time}
 
+The optimizations are applied cumulatively, in the order seen in class (Figure~\ref{fig:throughput},
+Table~\ref{tab:steps}). The three repetitions agree within 1.5\,\%, except one baseline run 7\,\%
+slower, which is why we report the median.
+
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\linewidth]{throughput.png}
-\caption{Training throughput after each cumulative optimization. Bars show the median of three
-runs and whiskers the range; labels give the speedup over the baseline.}
+\includegraphics[width=\columnwidth]{throughput.png}
+\caption{Training throughput after each cumulative optimization: median of three runs, whiskers
+show the range and labels the speedup over the baseline.}
 \label{fig:throughput}
 \end{figure}
 
 \begin{table}[H]
-\centering\small
-\caption{Throughput and peak memory of each step (median and range of three runs).}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\caption{Throughput (samples/s, median and range) and peak memory of each step.}
 \label{tab:steps}
-\begin{tabular}{rlrrr}
+\begin{tabular}{@{}rlrrr@{}}
 \toprule
-Step & Change & Samples/s [range] & Speedup & Memory \\
+ & Change & Samples/s & Speedup & Mem. \\
 \midrule
-0 & Baseline: FP32, batch 16, no workers & 64.3 [60.0, 64.7] & 1.00\x & 5.3\,GB \\
-1 & + 8 workers, pinned memory & 64.4 [64.4, 65.2] & 1.00\x & 5.3\,GB \\
+0 & FP32, batch 16 & 64.3 [60.0, 64.7] & 1.00\x & 5.3\,GB \\
+1 & + workers, pinned & 64.4 [64.4, 65.2] & 1.00\x & 5.3\,GB \\
 2 & + TF32 & 194.6 [194.6, 195.4] & 3.03\x & 5.3\,GB \\
-3 & + BF16 mixed precision & 289.0 [287.5, 291.5] & 4.49\x & 4.1\,GB \\
+3 & + BF16 & 289.0 [287.5, 291.5] & 4.49\x & 4.1\,GB \\
 4 & + batch 32 & 342.2 [342.2, 347.7] & 5.32\x & 6.6\,GB \\
-5 & + \texttt{torch.compile} & 397.0 [396.1, 402.4] & 6.17\x & 6.0\,GB \\
+5 & + compile & 397.0 [396.1, 402.4] & 6.17\x & 6.0\,GB \\
 6 & + fused AdamW & 430.1 [430.0, 436.2] & 6.69\x & 6.0\,GB \\
 7 & + batch 64 & 460.2 [460.0, 468.3] & 7.16\x & 10.4\,GB \\
 8 & + batch 128 & 470.4 [470.2, 477.5] & 7.32\x & 19.3\,GB \\
@@ -105,69 +152,98 @@ Step & Change & Samples/s [range] & Speedup & Memory \\
 \end{tabular}
 \end{table}
 
+\textbf{Input pipeline (step 1): no gain.} The dataset is tokenized beforehand and kept in
+memory, so building a batch costs almost nothing next to a 249\,ms training step. The GPU never
+waits for data, and workers and pinned memory have nothing to hide.
+
+\textbf{Precision (steps 2 and 3): the largest gains.} TF32 alone triples throughput without
+touching the model, because it runs the FP32 matrix products on the Tensor Cores (peak
+19.5 to 156\,TFLOP/s). BF16 mixed precision adds another 1.5\x{}: it also halves the bytes
+moved, and lowers peak memory from 5.3 to 4.1\,GB. Since BF16 keeps the FP32 exponent range,
+no loss scaling is needed.
+
+\textbf{Batch size (steps 4, 7 and 8): diminishing returns.} Larger batches feed larger matrices
+to the Tensor Cores and spread the fixed cost of each step over more samples. The gain shrinks
+quickly: +18\,\% for batch 32, +7\,\% for 64 and only +2\,\% for 128, which doubles the memory.
+The final run therefore uses batch 64.
+
+\textbf{Compilation and fused optimizer (steps 5 and 6).} \texttt{torch.compile} adds 16\,\%
+and fused AdamW another 8\,\%. The profile explains why.
+
 \subsection{Where the GPU time goes}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\linewidth]{profile.png}
+\includegraphics[width=\columnwidth]{profile.png}
 \caption{Share of GPU time per kernel group, from the profiler traces. Kernels launched inside
-the optimizer step are counted as optimizer. Memory copies stay below 0.5\,\%.}
+the optimizer step count as optimizer; memory copies stay below 0.5\,\%.}
 \label{fig:profile}
 \end{figure}
+
+In FP32, matrix products take 82\,\% of the GPU time (Figure~\ref{fig:profile}). Once
+they run on the Tensor Cores, their share falls to about 40\,\%, and kernels that were
+negligible become visible: speeding up one part makes the rest weigh more, as Amdahl's law
+predicts.
+
+Each later optimization targets exactly that remainder. \texttt{torch.compile} fuses the
+element-wise operations (GELU, dropout, residual additions, LayerNorm) into fewer kernels,
+cutting their share from 34 to 23\,\%. The optimizer then accounts for 11\,\%, because the
+standard AdamW launches many small kernels; the fused version brings it down to 4\,\%, and
+larger batches amortize it further (1\,\% at batch 128).
+
+In the final configuration, \textbf{attention is the largest cost (32\,\%)}. PyTorch selects the
+memory-efficient attention kernel rather than FlashAttention, because BERT passes a padding
+mask, and its backward pass alone takes 23\,\% of the GPU time. This is where the next
+improvement would have to come from.
 
 \subsection{Full training}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.74\linewidth]{loss.png}
-\caption{Training loss against wall-clock time for the two full trainings. The optimized run
-starts about a minute later because of compilation.}
+\includegraphics[width=\columnwidth]{loss.png}
+\caption{Training loss against wall-clock time for the two full trainings.}
 \label{fig:loss}
 \end{figure}
 
 \begin{table}[H]
-\centering\small
-\caption{Full training, 2 epochs.}
+\centering\footnotesize
+\caption{Full training, two epochs.}
 \label{tab:full}
-\begin{tabular}{lrr}
+\begin{tabular}{@{}lrr@{}}
 \toprule
  & Baseline (step 0) & Optimized (step 7) \\
 \midrule
-Training time & 2,747\,s (45.8\,min) & \textbf{431\,s (7.2\,min), 6.37\x} \\
+Training time & 2,747\,s (45.8\,min) & \textbf{431\,s (7.2\,min)} \\
 Mean throughput & 64.4 samples/s & 410.1 samples/s \\
-Exact match / F1 & 80.34 / 87.97 & 79.13 / 86.97 \\
+EM / F1 & 80.34 / 87.97 & 79.13 / 86.97 \\
 Peak memory & 5.3\,GB & 10.4\,GB \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+\textbf{Time improves 6.4\x{}, less than throughput (7.3\x).} The optimized run spends about
+56\,s outside the steady state, mostly compiling: its curve in Figure~\ref{fig:loss} starts a
+minute late. This fixed cost weighs more in a 7-minute run than it would in a longer one. Both
+curves drop at the start of the second epoch, when the model sees the training data again.
+
+\textbf{Quality is preserved.} The baseline matches the published BERT-base results (80.8 EM,
+88.5 F1). The optimized run loses about one point, plausibly because batch 64 makes four times
+fewer optimizer updates at the same learning rate; tuning it is outside the scope of this
+deliverable.
+
+\textbf{Utilization.} Counting 204\,GFLOP per training sample (Kaplan et al., 2020), the baseline
+reaches 13\,TFLOP/s, 67\,\% of the FP32 peak, and the optimized run 96\,TFLOP/s, 31\,\% of the
+BF16 peak: a lower fraction of a peak that is 16 times higher.
+
 \section{Conclusions}
 
 \begin{itemize}
-  \item \textbf{The input pipeline was never the bottleneck.} The data is tokenized in advance and
-        held in memory, so extra workers and pinned memory have nothing to hide (1.00\x).
-  \item \textbf{Precision is the decisive lever.} In FP32, 82\,\% of the GPU time goes to matrix
-        products on the CUDA cores. TF32 moves them to the Tensor Cores without touching the
-        model (3.0\x), and BF16 also halves the data moved (4.5\x). BF16 keeps the FP32
-        exponent range, so no loss scaling is needed.
-  \item \textbf{Each optimization exposes the next bottleneck.} Once matrix products are fast,
-        element-wise kernels and the optimizer weigh more: \texttt{torch.compile} fuses the
-        former (+16\,\%), and fused AdamW cuts the optimizer from 11\,\% to 4\,\% of the GPU time
-        (+8\,\%). Larger batches spread fixed per-step costs with diminishing returns: batch 128
-        gains only 2\,\% over 64 for twice the memory, so the final run uses 64.
-  \item \textbf{Attention is now the main cost (32\,\%).} PyTorch selects the memory-efficient
-        attention kernel rather than FlashAttention, because BERT passes a padding mask; its
-        backward pass alone takes 23\,\% of the GPU time. This is where the next gain lies.
-  \item \textbf{Time improves less than throughput} (6.4\x{} against 7.3\x). The optimized run
-        spends about 56\,s outside the steady state, mostly compiling, a fixed cost that weighs
-        more in a 7-minute run than in a longer one.
-  \item \textbf{Quality is preserved.} The baseline matches the published BERT-base figures
-        (80.8 EM, 88.5 F1). The optimized run loses about one point, plausibly because batch 64
-        makes four times fewer optimizer updates at the same learning rate; tuning it is outside
-        the scope of this deliverable.
-  \item \textbf{Utilization.} The baseline reaches 67\,\% of the FP32 peak and the optimized run
-        31\,\% of the BF16 peak, which is 16 times higher: 96 against 13\,TFLOP/s, counting
-        204\,GFLOP per training sample (Kaplan et al., 2020).
+  \item Precision is the decisive lever: it accounts for 4.5\x{} of the 7.3\x{} gain in
+        throughput.
+  \item Each optimization exposes the next bottleneck, and profiling after every step shows
+        which one: now it is attention.
+  \item The code was the easy part; most of the work was deploying it correctly on
+        FinisTerrae III.
 \end{itemize}
 
 \end{document}
