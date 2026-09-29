@@ -153,15 +153,35 @@ def autocast_ctx(precision):
     return torch.autocast(device_type="cuda", enabled=False)
 
 
-def run_profiler(model, loader, optimizer, scaler, args, device):
-    """A few steps under torch.profiler; prints the top CUDA kernels. Output goes to the log."""
-    from torch.profiler import ProfilerActivity, profile, schedule
+KERNEL_GROUPS = (                                  # first match wins
+    ("optimizer", ("adam", "multi_tensor_apply", "foreach")),
+    ("attention", ("fmha", "flash", "attention", "attn")),
+    ("matmul", ("gemm", "cutlass", "cublas", "aten::mm", "aten::addmm", "aten::bmm")),
+    ("memory copies", ("memcpy", "memset")),
+)
+
+
+def kernel_group(name):
+    name = name.lower()
+    for group, keys in KERNEL_GROUPS:
+        if any(k in name for k in keys):
+            return group
+    return "element-wise and other"
+
+
+def run_profiler(model, loader, optimizer, scaler, args, device, run_name):
+    """5 steps under torch.profiler, after 1 skipped and 3 warmup steps. Prints the top operations,
+    saves a trace for TensorBoard and returns the GPU time of each kernel group."""
+    from torch.profiler import ProfilerActivity, profile, schedule, tensorboard_trace_handler
 
     model.train()
     it = iter(loader)
-    sched = schedule(wait=1, warmup=3, active=5, repeat=1)
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                 schedule=sched, record_shapes=False) as prof:
+    active = 5
+    sched = schedule(wait=1, warmup=3, active=active, repeat=1)
+    trace_dir = os.path.join("profiles", run_name)
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], schedule=sched,
+                 on_trace_ready=tensorboard_trace_handler(trace_dir, use_gzip=True),
+                 record_shapes=False) as prof:
         for _ in range(9):
             batch = next(it)
             batch = {k: v.to(device, non_blocking=args.pin_memory) for k, v in batch.items()}
@@ -176,9 +196,30 @@ def run_profiler(model, loader, optimizer, scaler, args, device):
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             prof.step()
+    averages = prof.key_averages()
     print("\n===== torch.profiler: top 15 by CUDA time =====")
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=15))
+    print(averages.table(sort_by="cuda_time_total", row_limit=15))
+
+    # GPU time grouped by what it computes: from the GPU kernel rows when the profiler records
+    # them (CUDA), otherwise from the self GPU time of each operation
+    def device_time(evt):
+        t = getattr(evt, "self_device_time_total", None)
+        return (evt.self_cuda_time_total if t is None else t) / 1000     # us -> ms
+
+    groups = {}
+    try:
+        kernels = [e for e in averages if str(e.device_type).endswith("CUDA")]
+        rows = kernels or [e for e in averages if device_time(e) > 0]
+        for evt in rows:
+            g = kernel_group(evt.key)
+            groups[g] = groups.get(g, 0.0) + device_time(evt)
+    except Exception as e:                            # never lose a run because of the summary
+        print(f"WARNING: could not group the GPU time: {e}")
+    samples = active * args.batch_size
+    summary = {g: round(ms / samples, 3) for g, ms in sorted(groups.items())}   # ms per sample
+    print(f"GPU time per sample by kernel group (ms): {summary} | trace in {trace_dir}")
     print("===== end profiler =====\n", flush=True)
+    return summary
 
 
 @torch.no_grad()
@@ -325,13 +366,15 @@ def main():
     print(f"train features {len(data['train'])} | steps/epoch {steps_per_epoch} | total steps {total_steps}",
           flush=True)
 
+    profile_ms = None
     if args.profile:
-        run_profiler(model, train_loader, optimizer, scaler, args, device)
+        profile_ms = run_profiler(model, train_loader, optimizer, scaler, args, device, run_name)
 
     # ---------------- training loop
     model.train()
     torch.cuda.reset_peak_memory_stats()
     step, measure_t0, measured_steps = 0, None, 0
+    loss_curve = []                             # (step, seconds, mean loss) every --log-every steps
     running = torch.zeros((), device=device)
     torch.cuda.synchronize()
     t_start = time.perf_counter()
@@ -363,8 +406,9 @@ def main():
                 measured_time = time.perf_counter() - measure_t0
                 measured_steps = args.measure_steps
             if step % args.log_every == 0:
-                print(f"  step {step:>6}/{total_steps}  epoch {epoch}  loss {(running / args.log_every).item():.4f}",
-                      flush=True)
+                mean_loss = (running / args.log_every).item()
+                loss_curve.append((step, round(time.perf_counter() - t_start, 2), round(mean_loss, 4)))
+                print(f"  step {step:>6}/{total_steps}  epoch {epoch}  loss {mean_loss:.4f}", flush=True)
                 running.zero_()
             if step >= total_steps:
                 done = True
@@ -393,6 +437,9 @@ def main():
                    peak_tflops_used=PEAK_TFLOPS[args.precision])
     else:
         print("WARNING: not enough steps to measure throughput (increase --max-steps).")
+    res["loss_curve"] = loss_curve
+    if profile_ms:
+        res["profile_ms_per_sample"] = profile_ms
     if args.eval_samples:
         res["val_loss"] = round(evaluate(model, val_loader, args, device), 4)
     if args.squad_eval:
