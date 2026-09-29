@@ -1,0 +1,65 @@
+{
+  "run": "s7_batch64_r1",
+  "date": "2026-09-29T21:53:45",
+  "host": "c208-8",
+  "gpu": "NVIDIA A100-PCIE-40GB",
+  "torch": "2.11.0+cu128",
+  "model": "bert-base-uncased",
+  "max_len": 384,
+  "stride": 128,
+  "epochs": 1,
+  "max_steps": 300,
+  "batch_size": 64,
+  "lr": 3e-05,
+  "seed": 42,
+  "workers": 8,
+  "pin_memory": true,
+  "precision": "bf16",
+  "compile": true,
+  "fused_adam": true,
+  "warmup_steps": 60,
+  "measure_steps": 100,
+  "log_every": 100,
+  "profile": true,
+  "eval_samples": 1600,
+  "squad_eval": false,
+  "run_name": "s7_batch64_r1",
+  "prepare_only": false,
+  "total_steps": 300,
+  "wall_time_s": 41.17,
+  "avg_samples_per_s": 466.3,
+  "params": 108893186,
+  "non_embedding_params": 85056002,
+  "gflops_per_sample": 204.1,
+  "peak_mem_gb": 10.43,
+  "samples_per_s": 468.3,
+  "step_time_ms": 136.7,
+  "achieved_tflops": 95.6,
+  "mfu_pct": 30.6,
+  "peak_tflops_used": 312.0,
+  "loss_curve": [
+    [
+      100,
+      13.7,
+      3.6668
+    ],
+    [
+      200,
+      27.4,
+      1.9718
+    ],
+    [
+      300,
+      41.17,
+      1.7056
+    ]
+  ],
+  "profile_ms_per_sample": {
+    "attention": 0.804,
+    "element-wise and other": 1.253,
+    "matmul": 1.144,
+    "memory copies": 0.003,
+    "optimizer": 0.092
+  },
+  "val_loss": 1.5205
+}
