@@ -24,7 +24,10 @@ with the single-GPU optimizations of the course, applied one at a time.
 | `run_baseline.sh` | SLURM job: full training (2 epochs) with the baseline configuration |
 | `run_final.sh` | SLURM job: full training (2 epochs) with every optimization |
 | `summarize.py` | Builds the results table from `results/*.json` |
-| `results/` | Raw measurements of every run (JSON); the runs reported below are in `results/2026-09-24-first-round/` |
+| `plots.py` | Draws the figures of this report from `results/*.json` into `figures/` |
+| `results/` | Raw measurements of every run (JSON): throughput, memory, loss curve, profiler summary |
+| `profiles/` | `torch.profiler` traces of the first repetition of every step, for TensorBoard |
+| `figures/` | The figures of this report |
 
 To reproduce:
 
@@ -34,7 +37,16 @@ sbatch prepare_data.sh          # once
 sbatch run_improvements.sh      # step-by-step throughput
 sbatch run_baseline.sh          # full training, baseline
 sbatch run_final.sh             # full training, optimized
-python summarize.py results
+python summarize.py results     # table
+python plots.py results         # figures
+```
+
+To open a profiler trace in TensorBoard (the traces are gzipped JSON files, also readable in
+[Perfetto](https://ui.perfetto.dev)):
+
+```bash
+pip install tensorboard torch-tb-profiler
+tensorboard --logdir profiles
 ```
 
 ## 3. Methodology
@@ -43,6 +55,12 @@ python summarize.py results
   warmup** of 30 steps (60 with `torch.compile`), because the first iterations pay for CUDA
   context creation, memory pool growth and compilation. `torch.cuda.synchronize()` brackets the
   measured window.
+- Every step of the optimization sequence is run **3 times**, interleaved (all the steps, then
+  all of them again), and the report gives the **median** and the range. Absolute throughput
+  varies by a few percent from node to node, so the three repetitions run in the same job.
+- The **profiler** records 5 training steps (after 1 skipped and 3 warmup steps) in the first
+  repetition of every step. The GPU time is grouped by kernel type: matrix products, attention,
+  optimizer, memory copies, and the rest (element-wise operations, softmax, LayerNorm...).
 - The loss is accumulated on the GPU and read only every 100 steps: calling `.item()` at every
   step would force a CPU-GPU synchronization and distort the measurement.
 - **Training cost** follows Kaplan et al. (2020): `6 x N + 6 x n_layers x n_ctx x d_model`
