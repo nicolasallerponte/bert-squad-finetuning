@@ -208,7 +208,11 @@ def run_profiler(model, loader, optimizer, scaler, args, device, run_name):
 
     groups = {}
     try:
-        kernels = [e for e in averages if str(e.device_type).endswith("CUDA")]
+        # device rows are kernels and copies, plus annotations that span them (ProfilerStep#,
+        # Optimizer.step#...): those would count the same time twice
+        kernels = [e for e in averages if str(e.device_type).endswith("CUDA")
+                   and not getattr(e, "is_user_annotation", False)
+                   and not e.key.startswith(("ProfilerStep", "Optimizer."))]
         rows = kernels or [e for e in averages if device_time(e) > 0]
         for evt in rows:
             g = kernel_group(evt.key)

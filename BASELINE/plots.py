@@ -2,12 +2,13 @@
 """Figures of the report, from results/*.json:
 
     figures/throughput.png   samples/s of each optimization step (median and range of the repetitions)
-    figures/profile.png      GPU time per sample of each step, split by kernel group (torch.profiler)
+    figures/profile.png      share of the GPU time of each kernel group, per step (torch.profiler)
     figures/loss.png         training loss against time, baseline and optimized full runs
 
     python plots.py results
 """
 import glob
+import gzip
 import json
 import os
 import re
@@ -87,24 +88,59 @@ if order:
     save(fig, "throughput.png")
 
 # ---------------------------------------------------------------- 2. profiler breakdown per step
-prof = [(n, next((r["profile_ms_per_sample"] for r in steps[n] if r.get("profile_ms_per_sample")), None))
-        for n in order]
-prof = [(n, p) for n, p in prof if p]
+def trace_breakdown(run):
+    """Share of the GPU time of each kernel group, from the torch.profiler trace of a run.
+
+    Only GPU kernels and memory operations are counted (annotations such as ProfilerStep# span
+    them). A kernel launched inside Optimizer.step counts as optimizer whatever its name: without
+    --fused-adam, AdamW runs as generic element-wise kernels. Shares, not absolute times, because
+    the profiled steps are the first ones of the run and are slower than the measured window."""
+    from train_qa import kernel_group
+    paths = glob.glob(os.path.join("profiles", run["run"], "*.pt.trace.json*"))
+    if not paths:
+        return None
+    opener = gzip.open if paths[0].endswith(".gz") else open
+    with opener(paths[0], "rt") as f:
+        events = [e for e in json.load(f)["traceEvents"] if e.get("ph") == "X"]
+    opt_spans = [(e["ts"], e["ts"] + e["dur"]) for e in events
+                 if e.get("cat") == "user_annotation" and e["name"].startswith("Optimizer.step")]
+    opt_launches = {e["args"].get("correlation") for e in events if e.get("cat") == "cuda_runtime"
+                    and any(t0 <= e["ts"] <= t1 for t0, t1 in opt_spans)}
+    groups = {}
+    for e in events:
+        if e.get("cat") in ("kernel", "gpu_memcpy", "gpu_memset"):
+            g = "optimizer" if e["args"].get("correlation") in opt_launches else kernel_group(e["name"])
+            groups[g] = groups.get(g, 0.0) + e["dur"]
+    total = sum(groups.values())
+    return {g: 100 * t / total for g, t in groups.items()}
+
+
+prof = []
+for n in order:
+    first = next((r for r in steps[n] if r["run"].endswith("_r1")), steps[n][0])
+    b = trace_breakdown(first)
+    if b:
+        prof.append((n, b))
 if prof:
+    print("GPU time share (%): step | " + " | ".join(GROUPS))
+    for n, b in prof:
+        print(f"  {n} | " + " | ".join(f"{b.get(g, 0.0):.1f}" for g in GROUPS))
     y = range(len(prof))[::-1]
     fig, ax = plt.subplots(figsize=(8, 0.45 * len(prof) + 1.6))
     left = [0.0] * len(prof)
     for g, color in zip(GROUPS, COLORS):
         vals = [p.get(g, 0.0) for _, p in prof]
-        if not any(vals):
+        if max(vals) < 0.5:                               # invisible at this scale (memory copies)
             continue
         ax.barh(y, vals, left=left, height=0.6, color=color, edgecolor=SURFACE, linewidth=2, label=g)
+        if g in ("matmul", "attention"):                  # the two shares the discussion refers to
+            for yi, l0, v in zip(y, left, vals):
+                if v >= 9:
+                    ax.text(l0 + v / 2, yi, f"{v:.0f} %", ha="center", va="center", color="white", fontsize=8.5)
         left = [a + b for a, b in zip(left, vals)]
-    for yi, total in zip(y, left):
-        ax.text(total + max(left) * 0.01, yi, f"{total:.1f} ms", va="center", color=TEXT, fontsize=9)
     ax.set_yticks(list(y), [LABELS.get(n, n) for n, _ in prof])
-    ax.set_xlabel("GPU time per training sample (ms), torch.profiler")
-    ax.set_xlim(0, max(left) * 1.12)
+    ax.set_xlabel("share of the GPU time (%), torch.profiler")
+    ax.set_xlim(0, 100)
     ax.grid(axis="y", visible=False)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=5, frameon=False, fontsize=8.5)
     ax.set_title("Where the GPU time goes", loc="left", fontsize=11, pad=24)
