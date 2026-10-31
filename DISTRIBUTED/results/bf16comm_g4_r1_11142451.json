@@ -1,0 +1,72 @@
+{
+  "run": "bf16comm_g4_r1",
+  "date": "2026-10-30T23:12:24",
+  "hosts": [
+    "c208-8",
+    "c209-7"
+  ],
+  "gpu": "NVIDIA A100-PCIE-40GB",
+  "torch": "2.11.0+cu128",
+  "nccl": "2.28.9",
+  "model": "bert-base-uncased",
+  "max_len": 384,
+  "stride": 128,
+  "epochs": 1,
+  "max_steps": 200,
+  "batch_size": 64,
+  "lr": 3e-05,
+  "seed": 42,
+  "workers": 8,
+  "pin_memory": true,
+  "precision": "bf16",
+  "compile": true,
+  "fused_adam": true,
+  "zero": false,
+  "grad_compress": "bf16",
+  "bucket_mb": 25,
+  "warmup_steps": 60,
+  "measure_steps": 100,
+  "log_every": 100,
+  "profile": true,
+  "eval_samples": 0,
+  "squad_eval": false,
+  "run_name": "bf16comm_g4_r1",
+  "world_size": 4,
+  "nodes": 2,
+  "gpus_per_node": 2,
+  "strategy": "ddp+bf16comm",
+  "global_batch_size": 256,
+  "total_steps": 200,
+  "wall_time_s": 34.95,
+  "avg_samples_per_s": 1465.1,
+  "params": 108893186,
+  "non_embedding_params": 85056002,
+  "gflops_per_sample": 204.1,
+  "peak_mem_gb": 11.47,
+  "samples_per_s": 1674.7,
+  "samples_per_s_per_gpu": 418.7,
+  "step_time_ms": 152.9,
+  "achieved_tflops": 341.8,
+  "mfu_pct": 27.4,
+  "peak_tflops_used": 312.0,
+  "loss_curve": [
+    [
+      100,
+      15.33,
+      3.2214
+    ],
+    [
+      200,
+      30.64,
+      1.7693
+    ]
+  ],
+  "profile_ms_per_sample": {
+    "attention": 0.74,
+    "communication": 0.451,
+    "element-wise and other": 0.607,
+    "matmul": 1.096,
+    "memory copies": 0.091,
+    "optimizer": 0.047
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "run": "full_g4_global64",
+  "date": "2026-10-30T22:59:47",
+  "hosts": [
+    "c208-8",
+    "c209-7"
+  ],
+  "gpu": "NVIDIA A100-PCIE-40GB",
+  "torch": "2.11.0+cu128",
+  "nccl": "2.28.9",
+  "model": "bert-base-uncased",
+  "max_len": 384,
+  "stride": 128,
+  "epochs": 2,
+  "max_steps": 0,
+  "batch_size": 16,
+  "lr": 3e-05,
+  "seed": 42,
+  "workers": 8,
+  "pin_memory": true,
+  "precision": "bf16",
+  "compile": true,
+  "fused_adam": true,
+  "zero": false,
+  "grad_compress": "none",
+  "bucket_mb": 25,
+  "warmup_steps": 60,
+  "measure_steps": 100,
+  "log_every": 100,
+  "profile": false,
+  "eval_samples": 1600,
+  "squad_eval": true,
+  "run_name": "full_g4_global64",
+  "world_size": 4,
+  "nodes": 2,
+  "gpus_per_node": 2,
+  "strategy": "ddp",
+  "global_batch_size": 64,
+  "total_steps": 2764,
+  "wall_time_s": 246.2,
+  "avg_samples_per_s": 718.5,
+  "params": 108893186,
+  "non_embedding_params": 85056002,
+  "gflops_per_sample": 204.1,
+  "peak_mem_gb": 4.25,
+  "samples_per_s": 885.5,
+  "samples_per_s_per_gpu": 221.4,
+  "step_time_ms": 72.3,
+  "achieved_tflops": 180.8,
+  "mfu_pct": 14.5,
+  "peak_tflops_used": 312.0,
+  "loss_curve": [
+    [
+      100,
+      55.38,
+      5.1194
+    ],
+    [
+      200,
+      62.52,
+      2.7565
+    ],
+    [
+      300,
+      69.67,
+      1.8599
+    ],
+    [
+      400,
+      76.81,
+      1.5114
+    ],
+    [
+      500,
+      83.96,
+      1.4026
+    ],
+    [
+      600,
+      91.1,
+      1.3092
+    ],
+    [
+      700,
+      98.24,
+      1.2668
+    ],
+    [
+      800,
+      105.4,
+      1.2215
+    ],
+    [
+      900,
+      112.56,
+      1.1615
+    ],
+    [
+      1000,
+      119.71,
+      1.1691
+    ],
+    [
+      1100,
+      126.88,
+      1.1532
+    ],
+    [
+      1200,
+      134.04,
+      1.1049
+    ],
+    [
+      1300,
+      141.21,
+      1.1127
+    ],
+    [
+      1400,
+      148.38,
+      1.0599
+    ],
+    [
+      1500,
+      155.56,
+      0.8682
+    ],
+    [
+      1600,
+      162.72,
+      0.908
+    ],
+    [
+      1700,
+      169.89,
+      0.8815
+    ],
+    [
+      1800,
+      177.06,
+      0.8859
+    ],
+    [
+      1900,
+      184.24,
+      0.8906
+    ],
+    [
+      2000,
+      191.41,
+      0.8671
+    ],
+    [
+      2100,
+      198.58,
+      0.8848
+    ],
+    [
+      2200,
+      205.75,
+      0.8893
+    ],
+    [
+      2300,
+      212.93,
+      0.8878
+    ],
+    [
+      2400,
+      220.1,
+      0.8527
+    ],
+    [
+      2500,
+      227.27,
+      0.884
+    ],
+    [
+      2600,
+      234.44,
+      0.8621
+    ],
+    [
+      2700,
+      241.62,
+      0.8627
+    ]
+  ],
+  "val_loss": 0.9864,
+  "exact_match": 79.09,
+  "f1": 86.95,
+  "squad_examples": 10570
+}

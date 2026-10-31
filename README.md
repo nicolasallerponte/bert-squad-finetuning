@@ -5,7 +5,7 @@ Deliverables for the *HPC for AI* block of HPC Tools (Máster HPC, UDC/USC, 2026
 | Folder | Deliverable | Git tag |
 |---|---|---|
 | [`BASELINE/`](BASELINE/) | 1: single-GPU baseline and its optimization | `BASELINE` |
-| `DISTRIBUTED/` | 2: multi-node, multi-GPU training | `DISTRIBUTED` |
+| [`DISTRIBUTED/`](DISTRIBUTED/) | 2: multi-node, multi-GPU training | `DISTRIBUTED` |
 
 ## Repository structure
 
@@ -16,19 +16,29 @@ everything needed to reproduce it: the Python code, the SLURM jobs, the raw resu
 .
 ├── README.md               this file: structure and environment
 ├── requirements.txt        Python dependencies (PyTorch is installed apart, see below)
-└── BASELINE/               deliverable 1, tag BASELINE
+├── BASELINE/               deliverable 1, tag BASELINE
+│   ├── README.md           the report
+│   ├── report/             the same report in LaTeX, and its PDF
+│   ├── train_qa.py         training script; every optimization is a command-line flag
+│   ├── prepare_data.sh     SLURM job (CPU): downloads the model and tokenizes SQuAD once
+│   ├── run_improvements.sh SLURM job: applies the optimizations one at a time, 3 runs each
+│   ├── run_baseline.sh     SLURM job: full training, baseline configuration
+│   ├── run_final.sh        SLURM job: full training, optimized configuration
+│   ├── summarize.py        builds the results table from results/
+│   ├── plots.py            draws the figures of the report from results/ and profiles/
+│   ├── results/            one JSON file per run: throughput, memory, loss curve, EM and F1
+│   │   └── 2026-09-24-first-round/   an earlier round, one run per step, not used in the report
+│   ├── profiles/           torch.profiler traces, one per optimization step (TensorBoard)
+│   └── figures/            figures of the report
+└── DISTRIBUTED/            deliverable 2, tag DISTRIBUTED
     ├── README.md           the report
-    ├── report/             the same report in LaTeX, and its PDF
-    ├── train_qa.py         training script; every optimization is a command-line flag
-    ├── prepare_data.sh     SLURM job (CPU): downloads the model and tokenizes SQuAD once
-    ├── run_improvements.sh SLURM job: applies the optimizations one at a time, 3 runs each
-    ├── run_baseline.sh     SLURM job: full training, baseline configuration
-    ├── run_final.sh        SLURM job: full training, optimized configuration
+    ├── train_ddp.py        DDP training script; reuses data, evaluation and metrics from BASELINE
+    ├── run_scaling.sh      SLURM job, 2 nodes x 2 A100: throughput on 1, 2 and 4 GPUs, 3 runs each
+    ├── run_full.sh         SLURM job, 2 nodes x 2 A100: two full trainings with EM and F1
     ├── summarize.py        builds the results table from results/
-    ├── plots.py            draws the figures of the report from results/ and profiles/
-    ├── results/            one JSON file per run: throughput, memory, loss curve, EM and F1
-    │   └── 2026-09-24-first-round/   an earlier round, one run per step, not used in the report
-    ├── profiles/           torch.profiler traces, one per optimization step (TensorBoard)
+    ├── plots.py            draws the figures of the report
+    ├── results/            one JSON file per run
+    ├── profiles/           torch.profiler traces of rank 0, one per configuration
     └── figures/            figures of the report
 ```
 

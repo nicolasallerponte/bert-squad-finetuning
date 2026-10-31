@@ -1,0 +1,72 @@
+{
+  "run": "weak_g4_r1",
+  "date": "2026-10-30T23:08:14",
+  "hosts": [
+    "c208-8",
+    "c209-7"
+  ],
+  "gpu": "NVIDIA A100-PCIE-40GB",
+  "torch": "2.11.0+cu128",
+  "nccl": "2.28.9",
+  "model": "bert-base-uncased",
+  "max_len": 384,
+  "stride": 128,
+  "epochs": 1,
+  "max_steps": 200,
+  "batch_size": 64,
+  "lr": 3e-05,
+  "seed": 42,
+  "workers": 8,
+  "pin_memory": true,
+  "precision": "bf16",
+  "compile": true,
+  "fused_adam": true,
+  "zero": false,
+  "grad_compress": "none",
+  "bucket_mb": 25,
+  "warmup_steps": 60,
+  "measure_steps": 100,
+  "log_every": 100,
+  "profile": true,
+  "eval_samples": 0,
+  "squad_eval": false,
+  "run_name": "weak_g4_r1",
+  "world_size": 4,
+  "nodes": 2,
+  "gpus_per_node": 2,
+  "strategy": "ddp",
+  "global_batch_size": 256,
+  "total_steps": 200,
+  "wall_time_s": 36.86,
+  "avg_samples_per_s": 1389.2,
+  "params": 108893186,
+  "non_embedding_params": 85056002,
+  "gflops_per_sample": 204.1,
+  "peak_mem_gb": 11.07,
+  "samples_per_s": 1562.6,
+  "samples_per_s_per_gpu": 390.7,
+  "step_time_ms": 163.8,
+  "achieved_tflops": 319.0,
+  "mfu_pct": 25.6,
+  "peak_tflops_used": 312.0,
+  "loss_curve": [
+    [
+      100,
+      16.39,
+      3.222
+    ],
+    [
+      200,
+      32.8,
+      1.7729
+    ]
+  ],
+  "profile_ms_per_sample": {
+    "attention": 0.737,
+    "communication": 0.718,
+    "element-wise and other": 0.714,
+    "matmul": 1.187,
+    "memory copies": 0.013,
+    "optimizer": 0.046
+  }
+}
